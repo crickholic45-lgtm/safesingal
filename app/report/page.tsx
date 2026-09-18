@@ -1,10 +1,54 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
+import type { LatLngTuple } from 'leaflet';
 import { v4 as uuidv4 } from 'uuid';
 import { supabaseBrowser } from '@/lib/supabase';
 
-type Zone = { id: string; name: string };
+const LocationMapPreview = dynamic(
+  async () => {
+    const { MapContainer, Marker, TileLayer } = await import('react-leaflet');
+
+    function PreviewMap({
+      position,
+      onMove,
+    }: {
+      position: LatLngTuple;
+      onMove: (lat: number, lng: number) => void;
+    }) {
+      return (
+        <MapContainer center={position} zoom={14} scrollWheelZoom={false} style={{ height: '220px', width: '100%' }}>
+          <TileLayer
+            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; OpenStreetMap contributors'
+          />
+          <Marker
+            position={position}
+            draggable
+            eventHandlers={{
+              dragend: (event) => {
+                const target = event.target as { getLatLng: () => { lat: number; lng: number } };
+                const { lat, lng } = target.getLatLng();
+                onMove(lat, lng);
+              },
+            }}
+          />
+        </MapContainer>
+      );
+    }
+
+    return PreviewMap;
+  },
+  { ssr: false }
+);
+
+type Zone = { id: string; name: string; latitude: number; longitude: number };
+
+type ReportLocation = {
+  lat: number;
+  lng: number;
+};
 
 const AMBIENT_CATEGORIES = [
   { key: 'catcalling', label: 'Catcalling' },
@@ -18,9 +62,39 @@ const SERIOUS_CATEGORIES = [
   { key: 'physical_threat', label: 'Physical threat / violence' },
 ];
 
-// Anonymous device identity — a random ID generated once and kept
-// in this browser's localStorage. Never sent anywhere except as an
-// opaque token; never contains a name, phone number, or IP.
+const DEFAULT_CENTER: LatLngTuple = [19.2, 72.9];
+
+function haversineKm(a: ReportLocation, b: ReportLocation) {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const latDelta = toRad(b.lat - a.lat);
+  const lngDelta = toRad(b.lng - a.lng);
+  const latA = toRad(a.lat);
+  const latB = toRad(b.lat);
+
+  const hav =
+    Math.sin(latDelta / 2) ** 2 +
+    Math.cos(latA) * Math.cos(latB) * Math.sin(lngDelta / 2) ** 2;
+
+  return 2 * 6371 * Math.asin(Math.sqrt(hav));
+}
+
+function nearestZone(zones: Zone[], lat: number, lng: number) {
+  if (!zones.length) return null;
+
+  let closest = zones[0];
+  let minDistance = Number.POSITIVE_INFINITY;
+
+  for (const zone of zones) {
+    const distance = haversineKm({ lat, lng }, { lat: zone.latitude, lng: zone.longitude });
+    if (distance < minDistance) {
+      minDistance = distance;
+      closest = zone;
+    }
+  }
+
+  return { zone: closest, distanceKm: minDistance };
+}
+
 function getReporterToken(): string {
   const key = 'safesignal_reporter_token';
   let token = localStorage.getItem(key);
@@ -33,23 +107,57 @@ function getReporterToken(): string {
 
 export default function ReportPage() {
   const [zones, setZones] = useState<Zone[]>([]);
+  const [zonesLoading, setZonesLoading] = useState(true);
+  const [zonesError, setZonesError] = useState('');
   const [zoneId, setZoneId] = useState('');
   const [category, setCategory] = useState('');
-  const [showMore, setShowMore] = useState(false);
   const [detail, setDetail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [refId, setRefId] = useState<string | null>(null);
+  const [locationStatus, setLocationStatus] = useState('');
+  const [formError, setFormError] = useState('');
+  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
+  const [mapPosition, setMapPosition] = useState<LatLngTuple>(DEFAULT_CENTER);
 
   useEffect(() => {
-    supabaseBrowser
-      .from('zones')
-      .select('id, name')
-      .then(({ data }) => data && setZones(data as Zone[]));
+    async function loadZones() {
+      try {
+        const { data, error } = await supabaseBrowser
+          .from('zones')
+          .select('id, name, latitude, longitude');
+        if (error) {
+          setZonesError('Locations could not be loaded. Please refresh and try again.');
+          return;
+        }
+        const nextZones = (data as Zone[]) || [];
+        setZones(nextZones);
+
+        if (nextZones.length > 0) {
+          const first = nextZones[0];
+          setZoneId(first.id);
+          setMapPosition([first.latitude, first.longitude]);
+        }
+      } catch {
+        setZonesError('Locations could not be loaded. Please refresh and try again.');
+      } finally {
+        setZonesLoading(false);
+      }
+    }
+
+    loadZones();
   }, []);
 
+  useEffect(() => {
+    if (!zoneId || !zones.length) return;
+    const selected = zones.find((zone) => zone.id === zoneId);
+    if (!selected) return;
+    setMapPosition([selected.latitude, selected.longitude]);
+  }, [zoneId, zones]);
+
   async function submit() {
-    if (!zoneId || !category) return;
+    if (!zoneId || !category || submitting) return;
     setSubmitting(true);
+    setFormError('');
     const reporter_token = getReporterToken();
 
     try {
@@ -59,32 +167,106 @@ export default function ReportPage() {
         body: JSON.stringify({ zone_id: zoneId, category, detail, reporter_token }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'The report could not be submitted.');
+      }
       setRefId(data.report_ref_id || 'SUBMITTED');
-    } catch {
-      setRefId('SUBMITTED');
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'The report could not be submitted. Please try again.');
     } finally {
       setSubmitting(false);
     }
   }
 
+  async function copyRefId() {
+    if (!refId) return;
+    try {
+      await navigator.clipboard.writeText(refId);
+      setCopyState('copied');
+      window.setTimeout(() => setCopyState('idle'), 2000);
+    } catch {
+      setCopyState('idle');
+    }
+  }
+
+  function selectZoneById(id: string) {
+    setZoneId(id);
+    const matchedZone = zones.find((zone) => zone.id === id);
+    if (matchedZone) {
+      setMapPosition([matchedZone.latitude, matchedZone.longitude]);
+    }
+  }
+
+  function handleUseMyLocation() {
+    if (!navigator.geolocation) {
+      setLocationStatus('Location access is unavailable in this browser.');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        const found = nearestZone(zones, coords.latitude, coords.longitude);
+
+        if (!found) {
+          setLocationStatus('No nearby zones are available yet.');
+          return;
+        }
+
+        const { zone } = found;
+        setZoneId(zone.id);
+        setMapPosition([zone.latitude, zone.longitude]);
+        setLocationStatus(`Closest match: ${zone.name}`);
+      },
+      () => {
+        setLocationStatus('Location access was denied. You can still choose a zone manually.');
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  function handleMapMove(lat: number, lng: number) {
+    setMapPosition([lat, lng]);
+    const found = nearestZone(zones, lat, lng);
+
+    if (found) {
+      setZoneId(found.zone.id);
+      setLocationStatus(`Pin adjusted to ${found.zone.name}`);
+      return;
+    }
+
+    setLocationStatus('Pin moved manually. Choose the closest known location to confirm.');
+  }
+
   function reset() {
     setCategory('');
     setDetail('');
-    setShowMore(false);
     setRefId(null);
+    setCopyState('idle');
+    setLocationStatus('');
+    setFormError('');
+    if (zones[0]) {
+      setZoneId(zones[0].id);
+      setMapPosition([zones[0].latitude, zones[0].longitude]);
+    }
   }
 
   if (refId) {
     return (
       <div className="container">
         <div className="confirmation">
+          <div className="success-mark" aria-hidden="true">✓</div>
           <h1>Report received</h1>
           <p className="subtitle">Thank you. No further action is needed from you.</p>
-          <div className="ref-id">{refId}</div>
+          <div className="ref-id-row">
+            <div className="ref-id">{refId}</div>
+            <button type="button" className="copy-id-btn" onClick={copyRefId} aria-label="Copy report ID">
+              {copyState === 'copied' ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
           <p className="subtitle">Keep this if you want to reference it later.</p>
-          <span className="reset-link" onClick={reset}>
+          <button type="button" className="reset-link" onClick={reset}>
             File another report
-          </span>
+          </button>
         </div>
       </div>
     );
@@ -92,10 +274,31 @@ export default function ReportPage() {
 
   return (
     <div className="container">
+      <div className="page-kicker">Private by design</div>
       <h1>Flag a moment</h1>
-      <p className="subtitle">Anonymous. No account needed. Takes a few seconds.</p>
+      <p className="subtitle">Share a place-based safety concern in under a minute. No account, name, or contact details needed.</p>
 
-      <select value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
+      <div className="trust-strip">
+        <span>Anonymous</span><span>•</span><span>Place-based</span><span>•</span><span>Optional detail</span>
+      </div>
+
+      <div className="location-controls">
+        <div>
+          <div className="field-label">Where did this happen?</div>
+          <div className="field-help">Choose a nearby area. Exact addresses are not collected.</div>
+        </div>
+        <button type="button" className="ghost-btn" onClick={handleUseMyLocation} disabled={zonesLoading || !zones.length}>
+          Use my location
+        </button>
+      </div>
+
+      {locationStatus ? <p className="location-status">{locationStatus}</p> : null}
+
+      {zonesLoading ? <div className="loading-panel"><span className="inline-spinner" /> Loading nearby locations...</div> : null}
+      {zonesError ? <div className="error-panel" role="alert">{zonesError}</div> : null}
+      {!zonesLoading && !zonesError && !zones.length ? <div className="empty-panel">No reporting locations have been configured yet.</div> : null}
+
+      <select aria-label="Reporting location" value={zoneId} onChange={(e) => selectZoneById(e.target.value)} disabled={zonesLoading || !zones.length}>
         <option value="">Select location...</option>
         {zones.map((z) => (
           <option key={z.id} value={z.id}>
@@ -104,29 +307,36 @@ export default function ReportPage() {
         ))}
       </select>
 
+      <div className="location-map-preview">
+        <LocationMapPreview position={mapPosition} onMove={handleMapMove} />
+      </div>
+
       <div className="chip-grid">
+        <div className="section-label">What best describes it?</div>
         {AMBIENT_CATEGORIES.map((c) => (
-          <div
+          <button
             key={c.key}
+            type="button"
             className={`chip ${category === c.key ? 'selected' : ''}`}
             onClick={() => setCategory(c.key)}
           >
             {c.label}
-          </div>
+          </button>
         ))}
       </div>
 
       <details>
         <summary>Something more serious?</summary>
-        <div className="chip-grid" style={{ marginTop: 10 }}>
+        <div className="chip-grid serious-grid">
           {SERIOUS_CATEGORIES.map((c) => (
-            <div
+            <button
               key={c.key}
+              type="button"
               className={`chip serious ${category === c.key ? 'selected' : ''}`}
               onClick={() => setCategory(c.key)}
             >
               {c.label}
-            </div>
+            </button>
           ))}
         </div>
       </details>
@@ -140,9 +350,22 @@ export default function ReportPage() {
         />
       </details>
 
-      <button className="submit-btn" disabled={!zoneId || !category || submitting} onClick={submit}>
-        {submitting ? 'Submitting...' : 'Submit report'}
+      <button
+        type="button"
+        className="submit-btn"
+        disabled={!zoneId || !category || submitting}
+        onClick={submit}
+      >
+        {submitting ? (
+          <span className="button-loading-content">
+            <span className="button-spinner" aria-hidden="true" />
+            Submitting...
+          </span>
+        ) : (
+          'Submit report'
+        )}
       </button>
+      {formError ? <div className="error-panel form-error" role="alert">{formError}</div> : null}
     </div>
   );
 }

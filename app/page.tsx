@@ -2,20 +2,18 @@ import Link from 'next/link';
 
 export default function Home() {
   return (
-    <div className="container" style={{ textAlign: 'center', paddingTop: 100 }}>
-      <h1>SafeSignal</h1>
-      <p className="subtitle">Anonymous micro-reporting for emerging safety patterns.</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 30 }}>
-        <Link href="/report" className="submit-btn" style={{ textDecoration: 'none', textAlign: 'center' }}>
-          Report a moment
-        </Link>
-        <Link
-          href="/dashboard"
-          className="submit-btn"
-          style={{ textDecoration: 'none', textAlign: 'center', background: '#2c3050', color: '#f4f4f8' }}
-        >
-          Authority dashboard
-        </Link>
+    <div className="container landing-page">
+      <div className="page-kicker">A quieter way to speak up</div>
+      <h1>Small signals.<br />Safer places.</h1>
+      <p className="subtitle">SafeSignal turns anonymous, place-based reports into useful patterns for the people who can respond.</p>
+      <div className="landing-actions">
+        <Link href="/report" className="submit-btn landing-primary">Share a safety concern <span aria-hidden="true">↗</span></Link>
+        <Link href="/dashboard" className="landing-secondary">Open authority dashboard <span aria-hidden="true">→</span></Link>
+      </div>
+      <div className="landing-notes">
+        <div><strong>01</strong><span>No account needed</span></div>
+        <div><strong>02</strong><span>No names collected</span></div>
+        <div><strong>03</strong><span>Patterns, not profiles</span></div>
       </div>
     </div>
   );

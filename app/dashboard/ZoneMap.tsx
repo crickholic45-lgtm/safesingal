@@ -11,10 +11,10 @@ type AlertRow = {
 };
 
 const TIER_COLOR: Record<string, string> = {
-  watch: '#ffd166',
-  elevated: '#ff9f43',
-  urgent: '#ff5c6c',
-  immediate: '#ff2d55',
+  watch: '#d9a64a',
+  elevated: '#df7a3a',
+  urgent: '#c95d45',
+  immediate: '#a63d3d',
 };
 
 export default function ZoneMap({ alerts }: { alerts: AlertRow[] }) {
@@ -28,8 +28,8 @@ export default function ZoneMap({ alerts }: { alerts: AlertRow[] }) {
     <div className="map-wrap">
       <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; OpenStreetMap contributors &copy; CARTO'
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; OpenStreetMap contributors'
         />
         {withCoords.map((a) => (
           <CircleMarker
@@ -37,9 +37,10 @@ export default function ZoneMap({ alerts }: { alerts: AlertRow[] }) {
             center={[a.zones!.latitude, a.zones!.longitude]}
             radius={12}
             pathOptions={{
-              color: TIER_COLOR[a.tier] || '#7c8cff',
-              fillColor: TIER_COLOR[a.tier] || '#7c8cff',
-              fillOpacity: 0.7,
+              color: TIER_COLOR[a.tier] || '#c96d3d',
+              fillColor: TIER_COLOR[a.tier] || '#c96d3d',
+              fillOpacity: 0.75,
+              weight: 2,
             }}
           >
             <Popup>
