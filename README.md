@@ -10,8 +10,8 @@ Supabase project.
 ```
 app/
   page.tsx                    - landing page (links to report / dashboard)
-  report/page.tsx             - the public tap-report flow
-  dashboard/page.tsx          - the authority dashboard (list + map)
+  report/page.tsx             - public GPS/map-pin reporting flow
+  dashboard/page.tsx          - authority dashboard, active signals + history
   dashboard/ZoneMap.tsx       - Leaflet map component
   api/report/route.ts         - handles report submission + cooldown check
   api/score/route.ts          - runs the scoring engine across all zones
@@ -35,7 +35,7 @@ supabase/schema.sql           - full database schema + seed data, run this first
 - In your Supabase project: **SQL Editor → New query**
 - Paste the entire contents of `supabase/schema.sql` and run it
 - This creates the `zones`, `reports`, and `zone_alerts` tables, sets up
-  Row Level Security, and seeds 4 demo zones (edit the `insert into zones`
+  Row Level Security, exact-coordinate columns, and 4 demo zones (edit the `insert into zones`
   block at the bottom of that file to use your actual venue's spots)
 
 ### 3. Get your API keys
@@ -58,8 +58,9 @@ npm run dev
 Open **http://localhost:3000** — you'll see the landing page with two links.
 
 ### 6. Try the full loop
-1. Go to `/report`, pick a zone, tap a category, submit. You'll get a
-   reference ID back.
+1. Go to `/report`, allow location access or tap/drag anywhere on the map,
+  choose a category, and submit. The exact approved coordinates are stored
+  separately from the nearest named zone used for pattern grouping.
 2. Submit a few more reports for the *same* zone — for the pattern engine
    to fire you need reports from **at least 4 different "reporters"** across
    **at least 2 different days** (see `lib/engine.ts` for the exact numbers).
@@ -67,10 +68,10 @@ Open **http://localhost:3000** — you'll see the landing page with two links.
    `MIN_DISTINCT_DAYS` in `lib/engine.ts`, or manually edit a few rows'
    `created_at` values in Supabase's Table Editor to simulate different days.
 3. Go to `/dashboard` (browser will prompt for the username/password from
-   your `.env.local`), click **"Recalculate patterns now"**.
+  your `.env.local`), click **"Recalculate patterns"**.
 4. If the zone cleared the floor, an alert card appears with its score,
-   tier, and a pin on the map. Click **Mark reviewed** or **Dismiss** to
-   see the review loop work.
+  tier, and a pin on the map. Click **Mark reviewed** or **Dismiss**;
+  use **Past history** to review the status and report record afterward.
 
 ## How the engine actually works
 
@@ -112,9 +113,9 @@ just asserting it.
   a deliberate scope decision for the hackathon timeline — enough to
   keep the dashboard from being publicly browsable, not a production-grade
   auth system with roles/sessions.
-- **Zones are pre-mapped, not free-form GPS.** Good fit for structured
-  venues (stations, campuses); an open market would need either more
-  zones defined or a drop-a-pin flow layered on top.
+- **Pattern grouping uses named zones, while reports retain exact approved
+  coordinates.** Add more zones for better scoring granularity in an open
+  market or large campus.
 - **No SMS/WhatsApp push notifications** — the dashboard is the live view
   for this build; push notifications to an authority's phone are noted as
   production roadmap.

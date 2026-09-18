@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { zone_id, category, detail, reporter_token } = body;
+  const { zone_id, category, detail, reporter_token, latitude, longitude } = body;
 
   if (!zone_id || !category || !reporter_token) {
     return NextResponse.json(
@@ -42,6 +42,8 @@ export async function POST(req: NextRequest) {
     zone_id,
     category,
     detail: detail || null,
+    latitude: typeof latitude === 'number' ? latitude : null,
+    longitude: typeof longitude === 'number' ? longitude : null,
     reporter_token,
     is_immediate: isImmediate,
     report_ref_id,
@@ -56,6 +58,11 @@ export async function POST(req: NextRequest) {
   // pattern to form across multiple days.
   if (isImmediate) {
     const { data: zone } = await db.from('zones').select('name').eq('id', zone_id).single();
+    const { data: existingAlert } = await db
+      .from('zone_alerts')
+      .select('status')
+      .eq('zone_id', zone_id)
+      .maybeSingle();
     await db.from('zone_alerts').upsert(
       {
         zone_id,
@@ -65,7 +72,7 @@ export async function POST(req: NextRequest) {
         distinct_days: 1,
         total_reports: 1,
         top_categories: [category],
-        status: 'active',
+        status: existingAlert?.status || 'active',
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'zone_id' }

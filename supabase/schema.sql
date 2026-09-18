@@ -19,6 +19,8 @@ create table if not exists reports (
   category text not null,
   reporter_token text not null,   -- random UUID generated client-side, never tied to identity
   detail text,                    -- optional free text
+  latitude float,                 -- exact user-approved map position
+  longitude float,
   is_immediate boolean default false, -- true for serious categories that skip the pattern engine
   created_at timestamptz default now(),
   report_ref_id text unique not null
@@ -54,12 +56,14 @@ alter table zones enable row level security;
 
 -- Anyone (anon key) can INSERT a report, nobody can read raw reports
 -- through the public API — only the server (service role key) can.
+drop policy if exists "anyone can submit a report" on reports;
 create policy "anyone can submit a report"
   on reports for insert
   to anon
   with check (true);
 
 -- Zones list is public (needed for the report-picker UI)
+drop policy if exists "anyone can read zones" on zones;
 create policy "anyone can read zones"
   on zones for select
   to anon
@@ -68,6 +72,7 @@ create policy "anyone can read zones"
 -- zone_alerts is readable by anon for simplicity in this prototype.
 -- In production, this should be restricted to authenticated authority
 -- accounts only — see README "Known limitations" section.
+drop policy if exists "anyone can read zone alerts" on zone_alerts;
 create policy "anyone can read zone alerts"
   on zone_alerts for select
   to anon
@@ -84,3 +89,7 @@ insert into zones (name, latitude, longitude, venue_type) values
   ('VCET Main Gate', 19.2003, 72.8397, 'university'),
   ('Market Square - Gate 1', 19.2183, 72.9781, 'market')
 on conflict do nothing;
+
+-- Migration for projects that already created the reports table.
+alter table reports add column if not exists latitude float;
+alter table reports add column if not exists longitude float;

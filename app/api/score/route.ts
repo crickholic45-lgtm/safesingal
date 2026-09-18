@@ -33,6 +33,11 @@ export async function POST() {
     results.push({ zone: zone.name, ...result });
 
     if (result.alert) {
+      const { data: existingAlert } = await db
+        .from('zone_alerts')
+        .select('status')
+        .eq('zone_id', zone.id)
+        .maybeSingle();
       await db.from('zone_alerts').upsert(
         {
           zone_id: zone.id,
@@ -42,7 +47,7 @@ export async function POST() {
           distinct_days: result.distinctDays,
           total_reports: result.totalReports,
           top_categories: result.topCategories,
-          status: 'active',
+          status: existingAlert?.status || 'active',
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'zone_id' }

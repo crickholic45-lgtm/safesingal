@@ -8,7 +8,7 @@ import { supabaseBrowser } from '@/lib/supabase';
 
 const LocationMapPreview = dynamic(
   async () => {
-    const { MapContainer, Marker, TileLayer } = await import('react-leaflet');
+    const { MapContainer, Marker, TileLayer, useMap } = await import('react-leaflet');
 
     function PreviewMap({
       position,
@@ -17,8 +17,42 @@ const LocationMapPreview = dynamic(
       position: LatLngTuple;
       onMove: (lat: number, lng: number) => void;
     }) {
+      function MapPositionController() {
+        const map = useMap();
+
+        useEffect(() => {
+          map.setView(position);
+        }, [map, position]);
+
+        return null;
+      }
+
+      function MapClickController() {
+        const map = useMap();
+
+        useEffect(() => {
+          const handleClick = (event: { latlng: { lat: number; lng: number } }) => {
+            onMove(event.latlng.lat, event.latlng.lng);
+          };
+
+          map.on('click', handleClick);
+          return () => {
+            map.off('click', handleClick);
+          };
+        }, [map, onMove]);
+
+        return null;
+      }
+
       return (
-        <MapContainer center={position} zoom={14} scrollWheelZoom={false} style={{ height: '220px', width: '100%' }}>
+        <MapContainer
+          center={position}
+          zoom={14}
+          scrollWheelZoom={false}
+          style={{ height: '220px', width: '100%' }}
+        >
+          <MapPositionController />
+          <MapClickController />
           <TileLayer
             url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; OpenStreetMap contributors'
@@ -147,13 +181,6 @@ export default function ReportPage() {
     loadZones();
   }, []);
 
-  useEffect(() => {
-    if (!zoneId || !zones.length) return;
-    const selected = zones.find((zone) => zone.id === zoneId);
-    if (!selected) return;
-    setMapPosition([selected.latitude, selected.longitude]);
-  }, [zoneId, zones]);
-
   async function submit() {
     if (!zoneId || !category || submitting) return;
     setSubmitting(true);
@@ -164,7 +191,14 @@ export default function ReportPage() {
       const res = await fetch('/api/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zone_id: zoneId, category, detail, reporter_token }),
+        body: JSON.stringify({
+          zone_id: zoneId,
+          category,
+          detail,
+          reporter_token,
+          latitude: mapPosition[0],
+          longitude: mapPosition[1],
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -214,8 +248,8 @@ export default function ReportPage() {
 
         const { zone } = found;
         setZoneId(zone.id);
-        setMapPosition([zone.latitude, zone.longitude]);
-        setLocationStatus(`Closest match: ${zone.name}`);
+        setMapPosition([coords.latitude, coords.longitude]);
+        setLocationStatus(`Exact position found. Reporting area: ${zone.name}`);
       },
       () => {
         setLocationStatus('Location access was denied. You can still choose a zone manually.');
@@ -285,7 +319,7 @@ export default function ReportPage() {
       <div className="location-controls">
         <div>
           <div className="field-label">Where did this happen?</div>
-          <div className="field-help">Choose a nearby area. Exact addresses are not collected.</div>
+          <div className="field-help">Choose a nearby area, then tap or drag the pin to the exact spot.</div>
         </div>
         <button type="button" className="ghost-btn" onClick={handleUseMyLocation} disabled={zonesLoading || !zones.length}>
           Use my location

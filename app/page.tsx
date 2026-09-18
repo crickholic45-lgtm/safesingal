@@ -7,7 +7,7 @@ export default function Home() {
       <h1>Small signals.<br />Safer places.</h1>
       <p className="subtitle">SafeSignal turns anonymous, place-based reports into useful patterns for the people who can respond.</p>
       <div className="landing-actions">
-        <Link href="/report" className="submit-btn landing-primary">Share a safety concern <span aria-hidden="true">↗</span></Link>
+        <Link href="/report" className="report-orb" aria-label="Report a safety concern"><span aria-hidden="true">↗</span><strong>Report<br />a concern</strong></Link>
         <Link href="/dashboard" className="landing-secondary">Open authority dashboard <span aria-hidden="true">→</span></Link>
       </div>
       <div className="landing-notes">
