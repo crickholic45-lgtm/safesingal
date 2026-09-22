@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { LatLngTuple } from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { v4 as uuidv4 } from 'uuid';
 import { supabaseBrowser } from '@/lib/supabase';
 
@@ -129,6 +130,8 @@ function nearestZone(zones: Zone[], lat: number, lng: number) {
   return { zone: closest, distanceKm: minDistance };
 }
 
+const MAX_GROUPING_DISTANCE_KM = 0.75;
+
 function getReporterToken(): string {
   const key = 'safesignal_reporter_token';
   let token = localStorage.getItem(key);
@@ -166,11 +169,6 @@ export default function ReportPage() {
         const nextZones = (data as Zone[]) || [];
         setZones(nextZones);
 
-        if (nextZones.length > 0) {
-          const first = nextZones[0];
-          setZoneId(first.id);
-          setMapPosition([first.latitude, first.longitude]);
-        }
       } catch {
         setZonesError('Locations could not be loaded. Please refresh and try again.');
       } finally {
@@ -182,7 +180,7 @@ export default function ReportPage() {
   }, []);
 
   async function submit() {
-    if (!zoneId || !category || submitting) return;
+    if (!category || submitting) return;
     setSubmitting(true);
     setFormError('');
     const reporter_token = getReporterToken();
@@ -192,7 +190,7 @@ export default function ReportPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          zone_id: zoneId,
+          zone_id: zoneId || null,
           category,
           detail,
           reporter_token,
@@ -223,14 +221,6 @@ export default function ReportPage() {
     }
   }
 
-  function selectZoneById(id: string) {
-    setZoneId(id);
-    const matchedZone = zones.find((zone) => zone.id === id);
-    if (matchedZone) {
-      setMapPosition([matchedZone.latitude, matchedZone.longitude]);
-    }
-  }
-
   function handleUseMyLocation() {
     if (!navigator.geolocation) {
       setLocationStatus('Location access is unavailable in this browser.');
@@ -240,16 +230,14 @@ export default function ReportPage() {
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         const found = nearestZone(zones, coords.latitude, coords.longitude);
-
-        if (!found) {
-          setLocationStatus('No nearby zones are available yet.');
-          return;
-        }
-
-        const { zone } = found;
-        setZoneId(zone.id);
         setMapPosition([coords.latitude, coords.longitude]);
-        setLocationStatus(`Exact position found. Reporting area: ${zone.name}`);
+        if (found && found.distanceKm <= MAX_GROUPING_DISTANCE_KM) {
+          setZoneId(found.zone.id);
+          setLocationStatus(`Exact position found. Grouped with: ${found.zone.name}`);
+        } else {
+          setZoneId('');
+          setLocationStatus('Exact position found. This location is outside the demo areas and will be saved as an exact map point.');
+        }
       },
       () => {
         setLocationStatus('Location access was denied. You can still choose a zone manually.');
@@ -262,13 +250,14 @@ export default function ReportPage() {
     setMapPosition([lat, lng]);
     const found = nearestZone(zones, lat, lng);
 
-    if (found) {
+    if (found && found.distanceKm <= MAX_GROUPING_DISTANCE_KM) {
       setZoneId(found.zone.id);
-      setLocationStatus(`Pin adjusted to ${found.zone.name}`);
+      setLocationStatus(`Exact pin selected. Grouped with: ${found.zone.name}`);
       return;
     }
 
-    setLocationStatus('Pin moved manually. Choose the closest known location to confirm.');
+    setZoneId('');
+    setLocationStatus('Exact pin selected. This point is outside the named demo areas.');
   }
 
   function reset() {
@@ -278,10 +267,8 @@ export default function ReportPage() {
     setCopyState('idle');
     setLocationStatus('');
     setFormError('');
-    if (zones[0]) {
-      setZoneId(zones[0].id);
-      setMapPosition([zones[0].latitude, zones[0].longitude]);
-    }
+    setZoneId('');
+    setMapPosition(DEFAULT_CENTER);
   }
 
   if (refId) {
@@ -319,27 +306,17 @@ export default function ReportPage() {
       <div className="location-controls">
         <div>
           <div className="field-label">Where did this happen?</div>
-          <div className="field-help">Choose a nearby area, then tap or drag the pin to the exact spot.</div>
+          <div className="field-help">Your GPS or map pin is the real location. Named areas are optional demo grouping labels.</div>
         </div>
-        <button type="button" className="ghost-btn" onClick={handleUseMyLocation} disabled={zonesLoading || !zones.length}>
+        <button type="button" className="ghost-btn" onClick={handleUseMyLocation}>
           Use my location
         </button>
       </div>
 
       {locationStatus ? <p className="location-status">{locationStatus}</p> : null}
 
-      {zonesLoading ? <div className="loading-panel"><span className="inline-spinner" /> Loading nearby locations...</div> : null}
-      {zonesError ? <div className="error-panel" role="alert">{zonesError}</div> : null}
-      {!zonesLoading && !zonesError && !zones.length ? <div className="empty-panel">No reporting locations have been configured yet.</div> : null}
-
-      <select aria-label="Reporting location" value={zoneId} onChange={(e) => selectZoneById(e.target.value)} disabled={zonesLoading || !zones.length}>
-        <option value="">Select location...</option>
-        {zones.map((z) => (
-          <option key={z.id} value={z.id}>
-            {z.name}
-          </option>
-        ))}
-      </select>
+      {zonesLoading ? <div className="loading-panel"><span className="inline-spinner" /> Preparing optional area labels...</div> : null}
+      {zonesError ? <div className="error-panel" role="alert">Named area labels are unavailable, but exact map reporting still works.</div> : null}
 
       <div className="location-map-preview">
         <LocationMapPreview position={mapPosition} onMove={handleMapMove} />

@@ -7,9 +7,9 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { zone_id, category, detail, reporter_token, latitude, longitude } = body;
 
-  if (!zone_id || !category || !reporter_token) {
+  if (!category || !reporter_token || typeof latitude !== 'number' || typeof longitude !== 'number') {
     return NextResponse.json(
-      { error: 'zone_id, category, and reporter_token are required' },
+      { error: 'category, reporter_token, latitude, and longitude are required' },
       { status: 400 }
     );
   }
@@ -21,15 +21,16 @@ export async function POST(req: NextRequest) {
   // and return a success-shaped response so button-mashing does
   // nothing but doesn't look broken to the person tapping it.
   const cooldownCutoff = new Date(Date.now() - COOLDOWN_MINUTES * 60 * 1000).toISOString();
-  const { data: recentDuplicate } = await db
+  const duplicateQuery = db
     .from('reports')
     .select('report_ref_id')
-    .eq('zone_id', zone_id)
     .eq('reporter_token', reporter_token)
     .gte('created_at', cooldownCutoff)
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
+  const { data: recentDuplicate } = zone_id
+    ? await duplicateQuery.eq('zone_id', zone_id).maybeSingle()
+    : { data: null };
 
   if (recentDuplicate) {
     return NextResponse.json({ report_ref_id: recentDuplicate.report_ref_id });
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
   const report_ref_id = 'SS-' + uuidv4().split('-')[0].toUpperCase();
 
   const { error } = await db.from('reports').insert({
-    zone_id,
+    zone_id: zone_id || null,
     category,
     detail: detail || null,
     latitude: typeof latitude === 'number' ? latitude : null,
